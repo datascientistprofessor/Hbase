@@ -1,0 +1,19 @@
+# Creates the gsod_weather table with two column families:
+#   info    -> static station metadata (name, lat, lon, elevation)
+#   weather -> daily weather readings + derived event flags
+#
+# Run with:
+#   docker exec -it hbase-master hbase shell /scripts/create_table.hbase
+
+begin
+  disable 'gsod_weather'
+  drop 'gsod_weather'
+  puts 'Existing gsod_weather table dropped.'
+rescue => e
+  puts 'No existing gsod_weather table found, creating fresh.'
+end
+
+create 'gsod_weather', {NAME => 'info', VERSIONS => 1}, {NAME => 'weather', VERSIONS => 1}
+
+list
+describe 'gsod_weather'

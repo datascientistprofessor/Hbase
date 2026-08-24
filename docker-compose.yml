@@ -1,0 +1,181 @@
+version: "3.8"
+
+networks:
+  gsod-net:
+    driver: bridge
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hbase_data:
+
+services:
+  # ---------------------------------------------------------------------
+  # HDFS
+  # ---------------------------------------------------------------------
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    hostname: namenode
+    restart: always
+    ports:
+      - "9870:9870"   # Web UI
+      - "9000:9000"   # RPC
+    environment:
+      - CLUSTER_NAME=gsod-cluster
+    env_file:
+      - ./config/hadoop.env
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+      - ./data:/data
+      - ./scripts:/scripts
+    networks:
+      - gsod-net
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    hostname: datanode
+    restart: always
+    ports:
+      - "9864:9864"
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+    env_file:
+      - ./config/hadoop.env
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    networks:
+      - gsod-net
+
+  # ---------------------------------------------------------------------
+  # HBase
+  # ---------------------------------------------------------------------
+  zookeeper:
+    image: zookeeper:3.7
+    container_name: zookeeper
+    hostname: zookeeper
+    restart: always
+    ports:
+      - "2181:2181"
+    networks:
+      - gsod-net
+
+  hbase-master:
+    image: bde2020/hbase-master:1.0.0-hbase1.2.6
+    container_name: hbase-master
+    hostname: hbase-master
+    restart: always
+    ports:
+      - "16010:16010"
+    env_file:
+      - ./config/hadoop.env
+      - ./config/hbase.env
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870 datanode:9864 zookeeper:2181
+    volumes:
+      - hbase_data:/hbase-data
+      - ./scripts:/scripts
+    depends_on:
+      - namenode
+      - datanode
+      - zookeeper
+    networks:
+      - gsod-net
+
+  hbase-regionserver:
+    image: bde2020/hbase-regionserver:1.0.0-hbase1.2.6
+    container_name: hbase-regionserver
+    hostname: hbase-regionserver
+    restart: always
+    ports:
+      - "16030:16030"
+    env_file:
+      - ./config/hadoop.env
+      - ./config/hbase.env
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870 datanode:9864 zookeeper:2181 hbase-master:16010
+      - HBASE_CONF_hbase_regionserver_hostname=hbase-regionserver
+    depends_on:
+      - hbase-master
+    networks:
+      - gsod-net
+
+  hbase-thrift:
+    image: bde2020/hbase-master:1.0.0-hbase1.2.6
+    container_name: hbase-thrift
+    hostname: hbase-thrift
+    restart: always
+    ports:
+      - "9090:9090"
+    env_file:
+      - ./config/hadoop.env
+      - ./config/hbase.env
+    environment:
+      - SERVICE_PRECONDITION=hbase-master:16010 hbase-regionserver:16030
+      - HBASE_CONF_hbase_zookeeper_quorum=zookeeper
+    entrypoint: /entrypoint.sh
+    command: ["hbase", "thrift", "start"]
+    depends_on:
+      - hbase-master
+      - hbase-regionserver
+    networks:
+      - gsod-net
+
+  # ---------------------------------------------------------------------
+  # Spark
+  # ---------------------------------------------------------------------
+  spark-master:
+    build: ./spark
+    container_name: spark-master
+    hostname: spark-master
+    restart: always
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master"]
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./spark:/opt/spark-apps
+      - ./data:/data
+      - ./results:/opt/spark-apps/results
+    networks:
+      - gsod-net
+
+  spark-worker:
+    build: ./spark
+    container_name: spark-worker
+    hostname: spark-worker
+    restart: always
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./spark:/opt/spark-apps
+      - ./data:/data
+      - ./results:/opt/spark-apps/results
+    depends_on:
+      - spark-master
+    networks:
+      - gsod-net
+
+  # ---------------------------------------------------------------------
+  # Dashboard
+  # ---------------------------------------------------------------------
+  streamlit:
+    build: ./streamlit
+    container_name: streamlit
+    hostname: streamlit
+    restart: always
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./results:/app/results
+    environment:
+      - HBASE_THRIFT_HOST=hbase-thrift
+      - HBASE_THRIFT_PORT=9090
+    depends_on:
+      - hbase-thrift
+    networks:
+      - gsod-net

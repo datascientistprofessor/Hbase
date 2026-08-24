@@ -1,0 +1,4 @@
+lat_band,num_stations,avg_temp_f,avg_prcp_in
+Northern Tropics (0-30N),5,75.07,0.0
+Northern Temperate (30-60N),1785,53.81,0.06
+Arctic (>=60N),502,40.83,0.03
